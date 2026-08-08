@@ -9,6 +9,7 @@ import {
   type AgentControlBarControls,
 } from '@/components/agents-ui/agent-control-bar';
 import { Shimmer } from '@/components/ai-elements/shimmer';
+import { Mic, Sparkles, Volume2 } from 'lucide-react';
 import { cn } from '@/lib/shadcn/utils';
 import { TileLayout } from './tile-view';
 
@@ -180,6 +181,20 @@ export function AgentSessionView_01({
   const [chatOpen, setChatOpen] = useState(false);
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const { state: agentState } = useAgent();
+  const agentStatus = {
+  listening: {
+    label: 'Listening to you',
+    icon: Mic,
+  },
+  speaking: {
+    label: 'Orion is speaking',
+    icon: Volume2,
+  },
+  thinking: {
+    label: 'Orion is thinking...',
+    icon: Sparkles,
+  },
+}[agentState as 'listening' | 'speaking' | 'thinking'];
 
   const controls: AgentControlBarControls = {
     leave: true,
@@ -224,6 +239,20 @@ export function AgentSessionView_01({
         </AnimatePresence>
       </div>
       {/* Tile layout */}
+      <AnimatePresence mode="wait">
+  {agentStatus && (
+    <motion.div
+      key={agentStatus.label}
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -8 }}
+      className="pointer-events-none absolute left-1/2 top-10 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border bg-background/80 px-4 py-2 text-sm font-medium shadow-lg backdrop-blur-md"
+    >
+      <agentStatus.icon className="size-4" />
+      <span>{agentStatus.label}</span>
+    </motion.div>
+  )}
+</AnimatePresence>
       <TileLayout
         chatOpen={chatOpen}
         audioVisualizerType={audioVisualizerType}

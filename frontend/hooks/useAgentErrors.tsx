@@ -1,7 +1,6 @@
 import { ReactNode, useEffect } from 'react';
 import { toast as sonnerToast } from 'sonner';
 import { useAgent, useSessionContext } from '@livekit/components-react';
-import { WarningIcon } from '@phosphor-icons/react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 interface ToastProps {
@@ -14,13 +13,22 @@ function toastAlert(toast: ToastProps) {
 
   return sonnerToast.custom(
     (id) => (
-      <Alert onClick={() => sonnerToast.dismiss(id)} className="bg-accent w-full md:w-[364px]">
-        <WarningIcon weight="bold" />
-        <AlertTitle>{title}</AlertTitle>
-        {description && <AlertDescription>{description}</AlertDescription>}
+      <Alert
+        onClick={() => sonnerToast.dismiss(id)}
+        className="w-full border-destructive/20 bg-background md:w-[364px]"
+      >
+        <AlertTitle className="flex items-center gap-2">
+          ⚠️ {title}
+        </AlertTitle>
+
+        <AlertDescription className="mt-2">
+          {description && description}
+        </AlertDescription>
       </Alert>
     ),
-    { duration: 10_000 }
+    {
+      duration: 10_000,
+    }
   );
 }
 
@@ -33,28 +41,27 @@ export function useAgentErrors() {
       const reasons = agent.failureReasons;
 
       toastAlert({
-        title: 'Session ended',
+        title: 'Orioncouldn’t connect',
         description: (
           <>
-            {reasons.length > 1 && (
-              <ul className="list-inside list-disc">
-                {reasons.map((reason) => (
-                  <li key={reason}>{reason}</li>
-                ))}
-              </ul>
-            )}
-            {reasons.length === 1 && <p className="w-full">{reasons[0]}</p>}
-            <p className="w-full">
-              <a
-                target="_blank"
-                rel="noopener noreferrer"
-                href="https://docs.livekit.io/agents/start/voice-ai/"
-                className="whitespace-nowrap underline"
-              >
-                See quickstart guide
-              </a>
-              .
+            <p className="mb-3">
+              Something went wrong while connecting to your music
+              companion. Please try starting the conversation again.
             </p>
+
+            {reasons.length > 0 && (
+              <div className="rounded-md bg-muted/50 p-2 text-xs">
+                {reasons.length > 1 ? (
+                  <ul className="list-inside list-disc">
+                    {reasons.map((reason) => (
+                      <li key={reason}>{reason}</li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p>{reasons[0]}</p>
+                )}
+              </div>
+            )}
           </>
         ),
       });
@@ -63,3 +70,5 @@ export function useAgentErrors() {
     }
   }, [agent, isConnected, end]);
 }
+
+
