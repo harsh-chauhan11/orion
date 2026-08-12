@@ -24,6 +24,7 @@ from livekit.plugins import (
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
 from memory import lookup_user, save_user_memory
+from escalation import create_escalation
 
 
 logger = logging.getLogger("agent")
@@ -190,11 +191,86 @@ Never pretend that an action was completed when it was not.
 
 ESCALATION
 
-If the user asks for something outside your capabilities, say:
+You can create a human-help request when the user needs help
+that you cannot provide directly.
 
-"I can't do that directly yet, but I can help you with a
-recommendation or playlist idea."
+Escalate in these situations:
 
+1. The user reports a playlist or music-service problem that
+   Orion cannot actually resolve.
+
+2. The user needs music information or assistance that Orion
+   cannot reliably provide, especially when available tools
+   cannot resolve the problem.
+
+Do NOT create a human-help request for normal music
+recommendations, casual conversation, or questions that you
+can answer reliably.
+
+PERMISSION
+
+Before creating a human-help request, you MUST:
+
+1. Explain briefly why human help is needed.
+2. Tell the user what information will be shared.
+3. Ask the user for clear permission.
+4. Wait for the user's response.
+
+For example:
+
+"I can't resolve that directly. I can create a human support
+request and share your name, a short summary of the problem,
+what I already checked, the urgency, and your preferred
+follow-up method. Would you like me to do that?"
+
+Only call create_human_help_request after the user clearly
+agrees.
+
+If the user says no:
+
+- Do not create a request.
+- Respect their decision.
+- Continue helping within your capabilities.
+
+If the user's answer is unclear, ask for confirmation.
+
+PRIVACY
+
+Never include passwords, OTPs, PINs, account numbers,
+payment information, or other sensitive information in a
+human-help request.
+
+Only include information necessary to understand and resolve
+the problem.
+
+REQUEST SUMMARY
+
+When creating a human-help request, provide:
+
+- Who needs help
+- What happened
+- What Orion already checked
+- Urgency
+- User's language
+- Preferred follow-up method
+
+Keep the summary short and useful.
+
+AFTER CREATION
+
+When the tool successfully creates a request:
+
+1. Tell the user the request was created.
+2. Give them the request reference ID.
+3. Explain the next step honestly.
+4. Do not promise an immediate human response unless that
+   response is actually guaranteed.
+
+For example:
+
+"I've created your support request, reference ESC-20260812-ABC123.
+A human can review the request from the support system. I can't
+promise an immediate response, but your request is now open."
 
 STYLE
 
@@ -294,126 +370,168 @@ class Assistant(Agent):
             "user": saved_user,
         }
     @function_tool
-    async def search_music(self, query: str) -> dict:
+    async def create_human_help_request(
+        self,
+        name: str,
+        issue: str,
+        agent_checked: str,
+        urgency: str,
+        language: str,
+        preferred_follow_up: str,
+    ) -> dict:
         """
-        Search the live Apple music catalog for artists, songs, and albums.
+        Create a request for human assistance.
 
-        Use this tool when the user asks to search for, identify, or find
-        specific music information that should come from an external
-        music catalog.
+        IMPORTANT:
+        Only call this tool after the user has clearly given
+        permission to share the provided information with a human.
 
-        Do not use this tool for general music conversation, opinions,
-        recommendations based only on the conversation, or casual discussion.
-
-        The query should contain the artist name, song name, or album name
-        the user wants to find.
-
-        The returned data includes the exact time the external
-        music catalog was queried. When useful, tell the user that
-        the information was retrieved from the live music catalog
-        at that time.
+        Do not include passwords, OTPs, PINs, account numbers,
+        or other sensitive information.
         """
 
         logger.info(
-            "Searching music catalog for query=%s",
-            query,
+            "Creating human-help request for user_id=%s",
+            self.user_id,
         )
 
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    "https://itunes.apple.com/search",
-                    params={
-                        "term": query,
-                        "media": "music",
-                        "entity": "song",
-                        "limit": 5,
-                    },
-                    timeout=8.0,
-                )
+        result = create_escalation(
+            user_id=self.user_id,
+            name=name,
+            issue=issue,
+            agent_checked=agent_checked,
+            urgency=urgency,
+            language=language,
+            preferred_follow_up=preferred_follow_up,
+        )
 
-            response.raise_for_status()
+        logger.info(
+            "Human-help request created: %s",
+            result.get("request_id"),
+        )
 
-            data = response.json()
+        return result
+        @function_tool
+        async def search_music(self, query: str) -> dict:
+            """
+            Search the live Apple music catalog for artists, songs, and albums.
 
-            results = []
+            Use this tool when the user asks to search for, identify, or find
+            specific music information that should come from an external
+            music catalog.
 
-            for item in data.get("results", []):
-                results.append(
-                    {
-                        "artist": item.get("artistName"),
-                        "song": item.get("trackName"),
-                        "album": item.get("collectionName"),
-                        "genre": item.get("primaryGenreName"),
-                        "release_date": item.get("releaseDate"),
-                    }
-                )
+            Do not use this tool for general music conversation, opinions,
+            recommendations based only on the conversation, or casual discussion.
 
-            if not results:
-                return {
-                    "success": True,
-                    "found": False,
-                    "message": (
-                        f"No music results were found for '{query}'."
-                    ),
-                }
+            The query should contain the artist name, song name, or album name
+            the user wants to find.
 
-            return {
-                "success": True,
-                "found": True,
-                "query": query,
-                "data_source": "Apple iTunes Search API",
-                "retrieved_at": datetime.now(timezone.utc).isoformat(),
-                "results": results,
-            }
+            The returned data includes the exact time the external
+            music catalog was queried. When useful, tell the user that
+            the information was retrieved from the live music catalog
+            at that time.
+            """
 
-        except httpx.TimeoutException:
-            logger.warning(
-                "Music API timed out for query=%s",
+            logger.info(
+                "Searching music catalog for query=%s",
                 query,
             )
 
-            return {
-                "success": False,
-                "error": "timeout",
-                "message": (
-                    "The music catalog is taking too long to respond. "
-                    "Do not guess the answer. Tell the user that the "
-                    "music search is temporarily unavailable and ask "
-                    "them to try again."
-                ),
-            }
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.get(
+                        "https://itunes.apple.com/search",
+                        params={
+                            "term": query,
+                            "media": "music",
+                            "entity": "song",
+                            "limit": 5,
+                        },
+                        timeout=8.0,
+                    )
 
-        except httpx.HTTPError as e:
-            logger.error(
-                "Music API request failed: %s",
-                e,
-            )
+                response.raise_for_status()
 
-            return {
-                "success": False,
-                "error": "api_error",
-                "message": (
-                    "The music catalog could not be reached. "
-                    "Do not guess the answer. Tell the user that "
-                    "music search is temporarily unavailable."
-                ),
-            }
+                data = response.json()
 
-        except Exception as e:
-            logger.exception(
-                "Unexpected music search error: %s",
-                e,
-            )
+                results = []
 
-            return {
-                "success": False,
-                "error": "unexpected_error",
-                "message": (
-                    "The music search failed unexpectedly. "
-                    "Do not invent an answer."
-                ),
-            }
+                for item in data.get("results", []):
+                    results.append(
+                        {
+                            "artist": item.get("artistName"),
+                            "song": item.get("trackName"),
+                            "album": item.get("collectionName"),
+                            "genre": item.get("primaryGenreName"),
+                            "release_date": item.get("releaseDate"),
+                        }
+                    )
+
+                if not results:
+                    return {
+                        "success": True,
+                        "found": False,
+                        "message": (
+                            f"No music results were found for '{query}'."
+                        ),
+                    }
+
+                return {
+                    "success": True,
+                    "found": True,
+                    "query": query,
+                    "data_source": "Apple iTunes Search API",
+                    "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                    "results": results,
+                }
+
+            except httpx.TimeoutException:
+                logger.warning(
+                    "Music API timed out for query=%s",
+                    query,
+                )
+
+                return {
+                    "success": False,
+                    "error": "timeout",
+                    "message": (
+                        "The music catalog is taking too long to respond. "
+                        "Do not guess the answer. Tell the user that the "
+                        "music search is temporarily unavailable and ask "
+                        "them to try again."
+                    ),
+                }
+
+            except httpx.HTTPError as e:
+                logger.error(
+                    "Music API request failed: %s",
+                    e,
+                )
+
+                return {
+                    "success": False,
+                    "error": "api_error",
+                    "message": (
+                        "The music catalog could not be reached. "
+                        "Do not guess the answer. Tell the user that "
+                        "music search is temporarily unavailable."
+                    ),
+                }
+
+            except Exception as e:
+                logger.exception(
+                    "Unexpected music search error: %s",
+                    e,
+                )
+
+                return {
+                    "success": False,
+                    "error": "unexpected_error",
+                    "message": (
+                        "The music search failed unexpectedly. "
+                        "Do not invent an answer."
+                    ),
+                }
 
     async def on_enter(self) -> None:
 
