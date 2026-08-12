@@ -1,7 +1,8 @@
 import logging
-
+import httpx
 from dotenv import load_dotenv
 from livekit import rtc
+from datetime import datetime, timezone
 from livekit.agents import (
     Agent,
     AgentServer,
@@ -61,14 +62,27 @@ Your job is to:
 
 KNOWLEDGE
 
-You can discuss music and provide recommendations using the
-knowledge available to you.
+You can discuss music and provide recommendations using your
+general music knowledge.
+
+When the user asks you to search for, find, identify, or look up
+a specific artist, song, or album, use the search_music tool.
+
+Use search_music when the answer depends on external music
+catalog data.
+
+Do not use search_music for casual conversation, opinions, or
+recommendations that do not require an external lookup.
 
 Never invent a song, artist, album, release date, or other
 music information.
 
-If you are uncertain about a fact, say that you are not sure
-rather than making it up.
+If search_music returns data, use that data rather than relying
+on your own memory.
+
+If search_music fails, times out, or returns no results, clearly
+tell the user that the music catalog could not provide the
+information. Never guess or invent a result.
 
 
 LANGUAGE
@@ -279,6 +293,127 @@ class Assistant(Agent):
             "message": "The user's music memory was saved successfully.",
             "user": saved_user,
         }
+    @function_tool
+    async def search_music(self, query: str) -> dict:
+        """
+        Search the live Apple music catalog for artists, songs, and albums.
+
+        Use this tool when the user asks to search for, identify, or find
+        specific music information that should come from an external
+        music catalog.
+
+        Do not use this tool for general music conversation, opinions,
+        recommendations based only on the conversation, or casual discussion.
+
+        The query should contain the artist name, song name, or album name
+        the user wants to find.
+
+        The returned data includes the exact time the external
+        music catalog was queried. When useful, tell the user that
+        the information was retrieved from the live music catalog
+        at that time.
+        """
+
+        logger.info(
+            "Searching music catalog for query=%s",
+            query,
+        )
+
+        try:
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://itunes.apple.com/search",
+                    params={
+                        "term": query,
+                        "media": "music",
+                        "entity": "song",
+                        "limit": 5,
+                    },
+                    timeout=8.0,
+                )
+
+            response.raise_for_status()
+
+            data = response.json()
+
+            results = []
+
+            for item in data.get("results", []):
+                results.append(
+                    {
+                        "artist": item.get("artistName"),
+                        "song": item.get("trackName"),
+                        "album": item.get("collectionName"),
+                        "genre": item.get("primaryGenreName"),
+                        "release_date": item.get("releaseDate"),
+                    }
+                )
+
+            if not results:
+                return {
+                    "success": True,
+                    "found": False,
+                    "message": (
+                        f"No music results were found for '{query}'."
+                    ),
+                }
+
+            return {
+                "success": True,
+                "found": True,
+                "query": query,
+                "data_source": "Apple iTunes Search API",
+                "retrieved_at": datetime.now(timezone.utc).isoformat(),
+                "results": results,
+            }
+
+        except httpx.TimeoutException:
+            logger.warning(
+                "Music API timed out for query=%s",
+                query,
+            )
+
+            return {
+                "success": False,
+                "error": "timeout",
+                "message": (
+                    "The music catalog is taking too long to respond. "
+                    "Do not guess the answer. Tell the user that the "
+                    "music search is temporarily unavailable and ask "
+                    "them to try again."
+                ),
+            }
+
+        except httpx.HTTPError as e:
+            logger.error(
+                "Music API request failed: %s",
+                e,
+            )
+
+            return {
+                "success": False,
+                "error": "api_error",
+                "message": (
+                    "The music catalog could not be reached. "
+                    "Do not guess the answer. Tell the user that "
+                    "music search is temporarily unavailable."
+                ),
+            }
+
+        except Exception as e:
+            logger.exception(
+                "Unexpected music search error: %s",
+                e,
+            )
+
+            return {
+                "success": False,
+                "error": "unexpected_error",
+                "message": (
+                    "The music search failed unexpectedly. "
+                    "Do not invent an answer."
+                ),
+            }
 
     async def on_enter(self) -> None:
 
